@@ -7,7 +7,7 @@ internal class Program
 {
     private static async Task Main(string[] args)
     {
-        //var summary = BenchmarkRunner.Run<MeasurementCalculator>();
+        //BenchmarkRunner.Run<MeasurementCalculator>();
         await new MeasurementCalculator().CalculateMeasurements();
     }
 }
