@@ -19,7 +19,7 @@ public class MeasurementCalculator
     [Benchmark]
     public void CalculateMeasurements()
     {
-        var fileName = "C:/source/1brc-net/measurements.txt";
+        var fileName = "C:/source/1brc-net/measurements_big.txt";
         var fileSize = new FileInfo(fileName).Length;
         var dop = 20;
 
