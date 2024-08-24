@@ -1,14 +1,15 @@
 ﻿using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
-using System.Globalization;
+using System.Collections.Concurrent;
 using System.Text;
+using System.Threading.Channels;
 
 internal class Program
 {
     private static async Task Main(string[] args)
     {
-        //BenchmarkRunner.Run<MeasurementCalculator>();
-        await new MeasurementCalculator().CalculateMeasurements();
+        BenchmarkRunner.Run<MeasurementCalculator>();
+        //await new MeasurementCalculator().CalculateMeasurements();
     }
 }
 
@@ -20,51 +21,32 @@ public class MeasurementCalculator
     {
         var fileName = "C:/source/1brc-net/measurements.txt";
 
-        var dictionary = new Dictionary<string, Measurement>();
+        var dictionary = new ConcurrentDictionary<string, Measurement>();
+        var channel = Channel.CreateUnbounded<string>();
 
-        using var fs = new FileStream(fileName, FileMode.Open, FileAccess.Read);
-        using var reader = new StreamReader(fs);
-        string? line;
-        while ((line = await reader.ReadLineAsync()) != null)
-        {
-            var split = line.Split(';');
-            var city = split[0];
-            var value = double.Parse(split[1]);
-            
-            if(dictionary.TryGetValue(split[0], out var measurement)) 
-            {
-                if(measurement.Min > value)
-                {
-                    measurement.Min = value;
-                }
-                if(measurement.Max < value)
-                {
-                    measurement.Max = value;
-                }
-                measurement.Sum += value;
-                measurement.Count += 1;
-            }
-            else
-            {
-                dictionary.Add(split[0], new Measurement(){Min = value, Sum = value, Max = value, Count = 1});
-            }
-        }
+        await Task.WhenAll(WriteTask(fileName, channel.Writer), ReadTask(dictionary, channel.Reader));
 
+        // Console output
+        //PrintToConsole(dictionary);
+    }
+
+    private static void PrintToConsole(ConcurrentDictionary<string, Measurement> dictionary)
+    {
         var orderedCities = dictionary.OrderBy(x => x.Key).ToDictionary();
 
         var sb = new StringBuilder();
         var i = 0;
-        
+
         sb.Append("{");
-        foreach(var kv in orderedCities)
+        foreach (var kv in orderedCities)
         {
-            if(i < orderedCities.Count - 1) 
+            if (i < orderedCities.Count - 1)
             {
-                sb.Append($"{kv.Key}={kv.Value.Min}/{kv.Value.Sum/kv.Value.Count:F1}/{kv.Value.Max},");
+                sb.Append($"{kv.Key}={kv.Value.Min}/{kv.Value.Sum / kv.Value.Count:F1}/{kv.Value.Max},");
             }
             else
             {
-                sb.Append($"{kv.Key}={kv.Value.Min}/{kv.Value.Sum/kv.Value.Count:F1}/{kv.Value.Max}");
+                sb.Append($"{kv.Key}={kv.Value.Min}/{kv.Value.Sum / kv.Value.Count:F1}/{kv.Value.Max}");
             }
             i++;
         }
@@ -72,9 +54,59 @@ public class MeasurementCalculator
 
         Console.WriteLine(sb.ToString());
     }
+
+    private async Task WriteTask(string fileName, ChannelWriter<string> writer)
+    {
+        using var fs = new FileStream(fileName, FileMode.Open, FileAccess.Read);
+        using var fileReader = new StreamReader(fs);
+        string? line;
+        while ((line = await fileReader.ReadLineAsync()) != null)
+        {
+            await writer.WriteAsync(line);
+        }
+
+        writer.Complete();
+    }
+
+    private Task ReadTask(ConcurrentDictionary<string, Measurement> dictionary, ChannelReader<string> reader)
+    {
+        var dop = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = 10,
+        };
+
+        return Parallel.ForEachAsync(reader.ReadAllAsync(), dop, (line, cts) =>
+        {
+            ProcessLine(dictionary, line);
+
+            return ValueTask.CompletedTask;
+        });
+    }
+
+    private static void ProcessLine(ConcurrentDictionary<string, Measurement> dictionary, string line)
+    {
+        var split = line.Split(';');
+        var value = double.Parse(split[1]);
+
+        dictionary.AddOrUpdate(split[0], new Measurement() { Min = value, Sum = value, Max = value, Count = 1 }, (_, measurement) =>
+        {
+            if (measurement.Min > value)
+            {
+                measurement.Min = value;
+            }
+            if (measurement.Max < value)
+            {
+                measurement.Max = value;
+            }
+            measurement.Sum += value;
+            measurement.Count++;
+
+            return measurement;
+        });
+    }
 }
 
-internal class Measurement
+internal struct Measurement
 {
     public double Min { get;set; }
     public double Max { get;set; }
