@@ -8,8 +8,8 @@ internal class Program
 {
     private static void Main(string[] args)
     {
-        BenchmarkRunner.Run<MeasurementCalculator>();
-        //new MeasurementCalculator().CalculateMeasurements();
+        //BenchmarkRunner.Run<MeasurementCalculator>();
+        new MeasurementCalculator().CalculateMeasurements();
     }
 }
 
@@ -106,10 +106,30 @@ public class MeasurementCalculator
 
         try
         {
-            var split = line.Split(';');
-            var value = double.Parse(split[1]);
+            // Get city name
+            int i = 0;
+            while(i < line.Length && line[i] != ';')
+            {
+                i++;
+            }
 
-            dictionary.AddOrUpdate(split[0], new Measurement() { Min = value, Sum = value, Max = value, Count = 1 }, (_, measurement) =>
+            var lineSpan = line.AsSpan();
+            var city = lineSpan[..i];
+            var measurement = lineSpan[(i+1)..];
+            
+            i = 0;
+            // Get measurement integer and decimal parts
+            while(i < measurement.Length && measurement[i] != '.')
+            {
+                i++;
+            }
+            var integerPart = measurement[..i];
+            var decimalPart = measurement[(i+1)..];
+
+            // Store everything as an int, we'll do the proper conversion to float during print
+            var value = int.Parse(integerPart) * 10 + int.Parse(decimalPart);
+
+            dictionary.AddOrUpdate(city.ToString(), new Measurement() { Min = value, Sum = value, Max = value, Count = 1 }, (_, measurement) =>
             {
                 if (measurement.Min > value)
                 {
@@ -120,7 +140,7 @@ public class MeasurementCalculator
                     measurement.Max = value;
                 }
                 measurement.Sum += value;
-                measurement.Count += 1;
+                measurement.Count += 1uL;
 
                 return measurement;
             });
@@ -143,11 +163,11 @@ public class MeasurementCalculator
         {
             if (i < orderedCities.Count - 1)
             {
-                sb.Append($"{kv.Key}={kv.Value.Min}/{kv.Value.Sum / kv.Value.Count:F1}/{kv.Value.Max},");
+                sb.Append($"{kv.Key}={(float)kv.Value.Min / 10}/{(float)kv.Value.Sum / 10 / kv.Value.Count:F1}/{(float)kv.Value.Max / 10},");
             }
             else
             {
-                sb.Append($"{kv.Key}={kv.Value.Min}/{kv.Value.Sum / kv.Value.Count:F1}/{kv.Value.Max}");
+                sb.Append($"{kv.Key}={(float)kv.Value.Min / 10}/{(float)kv.Value.Sum / 10 / kv.Value.Count:F1}/{(float)kv.Value.Max / 10}");
             }
             i++;
         }
@@ -159,9 +179,9 @@ public class MeasurementCalculator
 
 internal class Measurement
 {
-    public double Min { get;set; }
-    public double Max { get;set; }
-    public double Sum { get;set; }
+    public int Min { get;set; }
+    public int Max { get;set; }
+    public int Sum { get;set; }
     public ulong Count {get;set;}
 }
 
