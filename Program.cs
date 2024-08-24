@@ -1,6 +1,7 @@
 ﻿using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Threading.Channels;
 
@@ -29,7 +30,7 @@ public class MeasurementCalculator
         // Console output
         //PrintToConsole(dictionary);
     }
-
+    
     private static void PrintToConsole(ConcurrentDictionary<string, Measurement> dictionary)
     {
         var orderedCities = dictionary.OrderBy(x => x.Key).ToDictionary();
@@ -37,7 +38,7 @@ public class MeasurementCalculator
         var sb = new StringBuilder();
         var i = 0;
 
-        sb.Append("{");
+        sb.Append('{');
         foreach (var kv in orderedCities)
         {
             if (i < orderedCities.Count - 1)
@@ -50,13 +51,16 @@ public class MeasurementCalculator
             }
             i++;
         }
-        sb.Append("}");
+        sb.Append('}');
 
         Console.WriteLine(sb.ToString());
     }
 
     private async Task WriteTask(string fileName, ChannelWriter<string> writer)
     {
+        var sw = new Stopwatch();
+        sw.Start();
+
         using var fs = new FileStream(fileName, FileMode.Open, FileAccess.Read);
         using var fileReader = new StreamReader(fs);
         string? line;
@@ -66,21 +70,25 @@ public class MeasurementCalculator
         }
 
         writer.Complete();
+        
+        sw.Stop();
+
+        Console.WriteLine($"{sw.Elapsed.TotalMilliseconds} ms for write");
     }
 
-    private Task ReadTask(ConcurrentDictionary<string, Measurement> dictionary, ChannelReader<string> reader)
+    private async Task ReadTask(ConcurrentDictionary<string, Measurement> dictionary, ChannelReader<string> reader)
     {
-        var dop = new ParallelOptions
-        {
-            MaxDegreeOfParallelism = 10,
-        };
+        var sw = new Stopwatch();
+        sw.Start();
 
-        return Parallel.ForEachAsync(reader.ReadAllAsync(), dop, (line, cts) =>
+        await foreach(var line in reader.ReadAllAsync())
         {
             ProcessLine(dictionary, line);
+        }
 
-            return ValueTask.CompletedTask;
-        });
+        sw.Stop();
+
+        Console.WriteLine($"{sw.Elapsed.TotalMilliseconds} ms for read.");
     }
 
     private static void ProcessLine(ConcurrentDictionary<string, Measurement> dictionary, string line)
