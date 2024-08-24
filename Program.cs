@@ -8,8 +8,8 @@ internal class Program
 {
     private static void Main(string[] args)
     {
-        //BenchmarkRunner.Run<MeasurementCalculator>();
-        new MeasurementCalculator().CalculateMeasurements();
+        BenchmarkRunner.Run<MeasurementCalculator>();
+        //new MeasurementCalculator().CalculateMeasurements();
     }
 }
 
@@ -19,7 +19,7 @@ public class MeasurementCalculator
     [Benchmark]
     public void CalculateMeasurements()
     {
-        var fileName = "C:/source/1brc-net/measurements_big.txt";
+        var fileName = "C:/source/1brc-net/measurements.txt";
         var fileSize = new FileInfo(fileName).Length;
         var dop = 20;
 
@@ -28,7 +28,7 @@ public class MeasurementCalculator
         using var mmf = MemoryMappedFile.CreateFromFile(fileName);
         ProcessFile(mmf, fileSize, dop, dictionary);
 
-        PrintToConsole(dictionary);
+        //PrintToConsole(dictionary);
     }
 
     private void ProcessFile(MemoryMappedFile mmf, long fileSize, int degreeOfParallelisation, ConcurrentDictionary<string, Measurement> dictionary)
@@ -36,11 +36,32 @@ public class MeasurementCalculator
         var chunkSize = fileSize / degreeOfParallelisation;
         var tasks = new Task[degreeOfParallelisation];
 
+        var chunkBoundaries = new long[degreeOfParallelisation + 1]; // Calculate the boundaries of the chunks here
+        chunkBoundaries[0] = 0L; // First chunk always starts at zero
+        chunkBoundaries[degreeOfParallelisation] = fileSize; // Last chunk always ends at last byte of the file
+
+        using(var accessor = mmf.CreateViewAccessor(0L, fileSize, MemoryMappedFileAccess.Read))
+        {
+            for(var i = 1; i < degreeOfParallelisation; i++)
+            {
+                var start = i * chunkSize;
+                var offset = -1;
+                byte character;
+
+                do
+                {
+                    offset++;
+                    accessor.Read(start + offset, out character);
+                }while(character != '\n'); // While we don't hit a new line character, we keep moving forward
+
+                chunkBoundaries[i] = start + offset;
+            }
+        }
+
         for(var i = 0; i < degreeOfParallelisation; i++)
         {
-            var start = i * chunkSize;
-            var end = i == degreeOfParallelisation - 1 ? fileSize : (i + 1) * chunkSize;
-
+            var start = chunkBoundaries[i];
+            var end = chunkBoundaries[i+1];
             tasks[i] = Task.Run(() => ProcessChunk(mmf, start, end, dictionary));
         }
 
@@ -78,6 +99,11 @@ public class MeasurementCalculator
 
     private static void ProcessLine(ConcurrentDictionary<string, Measurement> dictionary, string line)
     {
+        if(string.IsNullOrWhiteSpace(line))
+        {
+            return;
+        }
+
         try
         {
             var split = line.Split(';');
@@ -101,8 +127,7 @@ public class MeasurementCalculator
         }
         catch(Exception ex)
         {
-            // Ignore for now, but have to set chunk limit at line ends
-            //Console.WriteLine($"{line} was the problem");
+            Console.WriteLine($"{line} was the problem");
         }
     }
 
