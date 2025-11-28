@@ -48,25 +48,11 @@ public class MeasurementCalculator
                 var offset = -1;
                 byte character;
 
-                int blockSize = 4096;
-                while (true)
+                do
                 {
-                    if (start + offset + blockSize > fileSize) blockSize = (int)(fileSize - start - offset);
-                    
-                    Memory<byte> buffer = new byte[blockSize];
-                    accessor.ReadArray(start + offset, buffer.Span, blockSize);
-
-                    int newlineIndex = buffer.IndexOf((byte)'\n');
-                    if (newlineIndex != -1)
-                    {
-                        offset += newlineIndex + 1;
-                        break;
-                    }
-                    else
-                    {
-                        offset += blockSize;
-                    }
-                }
+                    offset++;
+                    accessor.Read(start + offset, out character);
+                }while(character != '\n'); // While we don't hit a new line character, we keep moving forward
 
                 chunkBoundaries[i] = start + offset;
             }
@@ -85,17 +71,24 @@ public class MeasurementCalculator
     private void ProcessChunk(MemoryMappedFile mmf, long start, long end, ConcurrentDictionary<string, Measurement> dictionary)
     {
         using var stream = mmf.CreateViewStream(start, end - start);
-        
-        const int bufferSize = 8192;
-        byte[] buffer = new byte[bufferSize];
-        int bytesRead;
+        using var reader = new BinaryReader(stream);
+        var sb = new StringBuilder();
 
         try
         {
-            while ((bytesRead = stream.Read(buffer, 0, bufferSize)) > 0)
+            while(true)
             {
-                var memory = new ReadOnlyMemory<byte>(buffer, 0, bytesRead);
-                ProcessBuffer(memory.Span, dictionary);
+                var character = reader.ReadChar();
+
+                if(character == '\n')
+                {
+                    ProcessLine(dictionary, sb.ToString());
+                    sb.Clear();   
+                }
+                else
+                {
+                    sb.Append(character);
+                }
             }
         }
         catch(EndOfStreamException)
@@ -104,20 +97,21 @@ public class MeasurementCalculator
         }
     }
 
-    private static void ProcessLine(ConcurrentDictionary<string, Measurement> dictionary, ReadOnlySpan<byte> lineBytes)
+    private static void ProcessLine(ConcurrentDictionary<string, Measurement> dictionary, string line)
     {
-        if (lineBytes.IsEmpty || lineBytes[0] == '\n' || lineBytes[0] == '\r')
+        if(string.IsNullOrWhiteSpace(line))
         {
             return;
         }
 
         try
         {
-            intsemicolonIndex = lineBytes.IndexOf((byte)';');
-            if (semicolonIndex == -1)
-                return;
-
-            var citySpan = lineBytes.Slice(0, semicolonIndex);
+            // Get city name
+            int i = 0;
+            while(i < line.Length && line[i] != ';')
+            {
+                i++;
+            }
 
             var lineSpan = line.AsSpan();
             var city = lineSpan[..i];
@@ -154,21 +148,6 @@ public class MeasurementCalculator
         catch(Exception ex)
         {
             Console.WriteLine($"{line} was the problem");
-        }
-    }
-
-    private static void ProcessBuffer(RoSpan<byte> buffer, ConcurrentDictionary<string, Measurement> dictionary)
-    {
-        int lineStart = 0;
-        
-        for (int i = 0; i < buffer.Length; i++)
-        {
-            if (buffer[i] == '\n')
-            {
-                var lineSpan = buffer.Slice(lineStart, i - lineStart + 1);
-                ProcessLine(dictionary, lineSpan);
-                lineStart = i + 1;
-            }
         }
     }
 
